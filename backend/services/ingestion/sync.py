@@ -39,6 +39,7 @@ MAX_PDFS_PER_RUN = 1
 # A source outage must not hold the hourly cron indefinitely. The RSS path is
 # still processed first; archive pages and PDFs are retried on later runs.
 MINISTERO_ARCHIVE_TIMEOUT_SECONDS = 45.0
+MINISTERO_RSS_TIMEOUT_SECONDS = 90.0
 MINISTERO_PAGE_TIMEOUT_SECONDS = 90.0
 MINISTERO_PDF_TIMEOUT_SECONDS = 120.0
 
@@ -86,7 +87,7 @@ def _merge_entries(pending: list[rss.RssEntry], discovered: list[rss.RssEntry]) 
 
 
 async def sync_ministero() -> SyncResult:
-    entries = await rss.fetch_entries()
+    entries = await rss.fetch_entries(timeout=MINISTERO_RSS_TIMEOUT_SECONDS)
     try:
         archive_links = await pages.list_archive_links(timeout=MINISTERO_ARCHIVE_TIMEOUT_SECONDS)
     except Exception as exc:  # archive down must not block the feed path
