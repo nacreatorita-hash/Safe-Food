@@ -34,6 +34,7 @@ MINISTERO_QUEUE_ID = "src-ministero-rss"
 # from the durable queue, so a large backlog is drained progressively.
 MAX_NEW_PAGES_PER_RUN = 5
 MAX_RECHECK_PAGES_PER_RUN = 3
+MAX_PDFS_PER_RUN = 1
 
 
 def _seafood(text: str) -> bool:
