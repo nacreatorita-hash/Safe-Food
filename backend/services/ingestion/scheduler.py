@@ -31,7 +31,6 @@ def _intervals_min() -> dict[str, int]:
     return {
         "rss": _minutes("SYNC_MINISTERO_MINUTES", 30),
         "rasff": _minutes("SYNC_RASFF_MINUTES", 360),
-        "wfs": _minutes("SYNC_FAO_MINUTES", 7 * 24 * 60),
         "api": _minutes("SYNC_ENVIRONMENT_MINUTES", 24 * 60),
     }
 
