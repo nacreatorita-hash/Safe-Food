@@ -5,6 +5,7 @@ worker. Ministero discovery is queued in ``data_sources.pending_entries`` so a
 25-page batch cannot make the remaining archive fall behind permanently.
 """
 
+import asyncio
 import json
 import logging
 from datetime import datetime, timezone
@@ -35,6 +36,11 @@ MINISTERO_QUEUE_ID = "src-ministero-rss"
 MAX_NEW_PAGES_PER_RUN = 5
 MAX_RECHECK_PAGES_PER_RUN = 3
 MAX_PDFS_PER_RUN = 1
+# A source outage must not hold the hourly cron indefinitely. The RSS path is
+# still processed first; archive pages and PDFs are retried on later runs.
+MINISTERO_ARCHIVE_TIMEOUT_SECONDS = 45.0
+MINISTERO_PAGE_TIMEOUT_SECONDS = 90.0
+MINISTERO_PDF_TIMEOUT_SECONDS = 120.0
 
 
 def _seafood(text: str) -> bool:
@@ -82,7 +88,7 @@ def _merge_entries(pending: list[rss.RssEntry], discovered: list[rss.RssEntry]) 
 async def sync_ministero() -> SyncResult:
     entries = await rss.fetch_entries()
     try:
-        archive_links = await pages.list_archive_links()
+        archive_links = await pages.list_archive_links(timeout=MINISTERO_ARCHIVE_TIMEOUT_SECONDS)
     except Exception as exc:  # archive down must not block the feed path
         logger.warning("archivio Ministero non raggiungibile: %s", exc)
         archive_links = []
@@ -118,7 +124,9 @@ async def sync_ministero() -> SyncResult:
         entry for entry in entries if entry.source_id in (enrichment_ids or existing_ids)
     ][:MAX_RECHECK_PAGES_PER_RUN]
     fetch_entries = _merge_entries(new_batch, rechecks)
-    detail = await pages.fetch_pages([entry.link for entry in fetch_entries]) if fetch_entries else {}
+    detail = (await pages.fetch_pages(
+        [entry.link for entry in fetch_entries], timeout=MINISTERO_PAGE_TIMEOUT_SECONDS
+    )) if fetch_entries else {}
 
     pdf_targets = [page.pdf_urls[0] for page in detail.values() if page.pdf_urls][:MAX_PDFS_PER_RUN]
     pdf_files: dict[str, str] = {}
@@ -126,7 +134,7 @@ async def sync_ministero() -> SyncResult:
     pdf_ocr_errors: dict[str, str] = {}
     if pdf_targets:
         try:
-            fetched = await pages.fetch_many(pdf_targets)
+            fetched = await pages.fetch_many(pdf_targets, timeout=MINISTERO_PDF_TIMEOUT_SECONDS)
             pdf_files = {url: result["file"] for url, result in fetched.items() if result.get("file")}
             pdf_ocr = {url: str(result["ocr_text"]) for url, result in fetched.items() if result.get("ocr_text")}
             pdf_ocr_errors = {url: str(result["ocr_error"]) for url, result in fetched.items() if result.get("ocr_error")}
