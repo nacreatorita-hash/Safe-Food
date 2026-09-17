@@ -1,5 +1,5 @@
 // Offline shell: cache the app shell, serve the last successful API response when offline.
-const SHELL = "food-alert-shell-v1";
+const SHELL = "food-alert-shell-v2";
 const DATA = "food-alert-data-v1";
 
 self.addEventListener("install", (event) => {
