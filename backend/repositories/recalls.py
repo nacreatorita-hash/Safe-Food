@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import Text, and_, cast, func, not_, or_, select
+from sqlalchemy import Text, and_, cast, desc, func, not_, or_, select, update
 
 from lib.db import session_scope
 from models.tables import recalls
@@ -89,6 +89,29 @@ async def list_source_ids(source: str) -> set[str]:
     async with session_scope() as session:
         rows = await session.execute(select(recalls.c.source_id).where(recalls.c.source == source))
         return {str(row[0]) for row in rows.all()}
+
+
+async def list_recent_source_records(source: str, since: datetime, limit: int) -> list[dict[str, Any]]:
+    """Return a small, recent slice for cheap official-page rechecks."""
+    stmt = (
+        select(recalls)
+        .where(recalls.c.source == source, recalls.c.published_at >= since, recalls.c.source_url.is_not(None))
+        .order_by(desc(recalls.c.published_at))
+        .limit(limit)
+    )
+    async with session_scope() as session:
+        return [clean(dict(row)) for row in (await session.execute(stmt)).mappings().all()]
+
+
+async def update_by_source(source: str, source_id: str, values: dict[str, Any]) -> bool:
+    """Apply a bounded official-source correction to an existing recall."""
+    async with session_scope() as session:
+        result = await session.execute(
+            update(recalls)
+            .where(recalls.c.source == source, recalls.c.source_id == source_id)
+            .values(**values)
+        )
+        return bool(result.rowcount)
 
 
 async def list_source_ids_needing_enrichment(source: str, limit: int) -> set[str]:

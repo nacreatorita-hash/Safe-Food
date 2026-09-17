@@ -9,14 +9,14 @@ re-read automatically.
 import asyncio
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from models.schemas import RecallLot, SyncResult
 from repositories.fao import count_areas, count_measurements, get_area_record as get_fao_area_record
 from repositories.fao import list_areas as list_fao_areas
 from repositories.fao import replace_measurements, upsert_area
-from repositories.recalls import count_for_source, list_source_ids
+from repositories.recalls import count_for_source, list_recent_source_records, list_source_ids, update_by_source
 from repositories.sources import pending_entries, update_source
 from services.environment import fao_service
 from services.ingestion import ministero_pdf_service as pdf
@@ -42,6 +42,8 @@ MAX_PDFS_PER_RUN = MAX_NEW_PAGES_PER_RUN
 MINISTERO_RSS_TIMEOUT_SECONDS = 90.0
 MINISTERO_PAGE_TIMEOUT_SECONDS = 90.0
 MINISTERO_PDF_TIMEOUT_SECONDS = 120.0
+MINISTERO_RECHECK_DAYS = 30
+MINISTERO_RECHECK_LIMIT = 25
 
 
 def _seafood(text: str) -> bool:
@@ -84,6 +86,111 @@ def _merge_entries(pending: list[rss.RssEntry], discovered: list[rss.RssEntry]) 
         if entry.source_id:
             merged[entry.source_id] = entry
     return list(merged.values())
+
+
+def _official_page_fingerprint(page: pages.RecallPage) -> str:
+    """Fingerprint only the cheap, labelled values exposed by the official page."""
+    return normalizer.content_hash(
+        page.url,
+        page.fields.get("brand"),
+        page.fields.get("product_name"),
+        page.fields.get("risk_description"),
+        page.fields.get("published"),
+        page.pdf_urls[0] if page.pdf_urls else None,
+    )
+
+
+async def _recheck_recent_ministero() -> tuple[int, int]:
+    """Check recent official pages without downloading or parsing their PDFs."""
+    now = datetime.now(timezone.utc)
+    records = await list_recent_source_records(
+        MINISTERO_SOURCE,
+        now - timedelta(days=MINISTERO_RECHECK_DAYS),
+        MINISTERO_RECHECK_LIMIT,
+    )
+    urls = [str(record["source_url"]) for record in records if record.get("source_url")]
+    if not urls:
+        return 0, 0
+
+    try:
+        checked_pages = await pages.fetch_pages(urls, timeout=MINISTERO_PAGE_TIMEOUT_SECONDS)
+    except Exception as exc:
+        logger.warning("ricontrollo pagine Ministero fallito: %s", exc)
+        return 0, 0
+
+    changed = unchanged = 0
+    for existing in records:
+        source_url = str(existing.get("source_url") or "")
+        page = checked_pages.get(source_url)
+        # A challenge/partial response must never erase values already stored.
+        if page is None or (not page.fields and not page.pdf_urls):
+            continue
+
+        fingerprint = _official_page_fingerprint(page)
+        official_fields = dict(existing.get("official_fields") or {})
+        if official_fields.get("_page_fingerprint") == fingerprint:
+            unchanged += 1
+            continue
+
+        values: dict[str, Any] = {
+            "official_fields": {
+                **official_fields,
+                "_page_fingerprint": fingerprint,
+                "_page_checked_at": now.isoformat(),
+                "_page_pdf_url": page.pdf_urls[0] if page.pdf_urls else "",
+            },
+            "retrieved_at": now,
+        }
+        canonical_changed = False
+        for field_name in ("brand", "product_name", "risk_description"):
+            page_value = page.fields.get(field_name)
+            if page_value and page_value.strip() != str(existing.get(field_name) or "").strip():
+                values[field_name] = page_value.strip()
+                canonical_changed = True
+
+        published = pages.italian_date_to_iso(page.fields.get("published", ""))
+        if published and published != str(existing.get("published_at") or "")[:10]:
+            values["published_at"] = normalizer.parse_date(published)
+            canonical_changed = True
+
+        official_pdf = page.pdf_urls[0] if page.pdf_urls else None
+        if official_pdf and official_pdf != existing.get("pdf_url"):
+            # Record the new official document URL; old PDFs are intentionally
+            # not re-downloaded during this lightweight historical check.
+            values["pdf_url"] = official_pdf
+            canonical_changed = True
+        if page.image_url and not existing.get("image_url"):
+            values["image_url"] = page.image_url
+            canonical_changed = True
+
+        reason = page.fields.get("risk_description")
+        if reason and reason.strip() != str(existing.get("risk_description") or "").strip():
+            reason_low = reason.lower()
+            if "revoca" in reason_low or "revocato" in reason_low or "revocata" in reason_low:
+                values["risk_type"] = "altro"
+                values["severity"] = "informativo"
+            else:
+                risk, severity = normalizer.classify_risk(
+                    " ".join(filter(None, [reason, page.fields.get("product_name"), page.fields.get("brand")]))
+                )
+                values["risk_type"] = risk
+                values["severity"] = severity
+            canonical_changed = True
+
+        if canonical_changed:
+            hash_fields = {key: value for key, value in values["official_fields"].items() if key != "_page_checked_at"}
+            values["content_hash"] = normalizer.content_hash(
+                existing.get("source"),
+                existing.get("source_id"),
+                values.get("product_name", existing.get("product_name")),
+                values.get("risk_description", existing.get("risk_description")),
+                json.dumps(hash_fields, sort_keys=True, default=str),
+            )
+
+        if await update_by_source(MINISTERO_SOURCE, str(existing["source_id"]), values):
+            changed += 1
+
+    return changed, unchanged
 
 
 async def sync_ministero() -> SyncResult:
@@ -203,8 +310,11 @@ async def sync_ministero() -> SyncResult:
         "pending_entries": [_entry_dict(entry) for entry in remaining],
         "pending_count": len(remaining),
     })
+    rechecked, recheck_unchanged = await _recheck_recent_ministero()
+    await update_source(MINISTERO_QUEUE_ID, {"last_recheck_at": datetime.now(timezone.utc)})
     msg = (f"Feed ufficiali letti: {len(entries)} elementi, {len(new_candidates)} nuovi individuati, "
            f"{inserted} inseriti, {updated} aggiornati, {unchanged} invariati, {failed} falliti; "
+           f"pagine recenti ricontrollate: {rechecked} aggiornate, {recheck_unchanged} invariate; "
            f"richiami storici non rianalizzati; coda residua: {len(remaining)}")
     return SyncResult(source_id="", ok=failed == 0, message=msg + ".", fetched=len(entries),
                       inserted=inserted, updated=updated, unchanged=unchanged, failed=failed)

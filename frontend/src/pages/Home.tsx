@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, FlaskConical, Nut, Waves } from "lucide-react";
+import { AlertTriangle, FlaskConical, Nut, RefreshCw, ShieldCheck, Waves } from "lucide-react";
 import { apiGet } from "@/lib/api";
 import { buttonVariants } from "@/components/ui/button";
 import RecallCard from "@/components/food-alert/RecallCard";
@@ -22,43 +22,42 @@ export default function Home() {
   return (
     <div className="space-y-10">
       {/* Hero — renders unconditionally, never gated on a fetch */}
-      <section className="overflow-hidden rounded-3xl bg-[#091E3A] px-6 py-10 text-white lg:px-12 lg:py-14">
-        <div className="grid gap-8 lg:grid-cols-12 lg:items-center">
-          <div className="space-y-4 lg:col-span-7">
-            <span className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-bold uppercase tracking-[0.2em]">
-              <AlertTriangle className="size-3.5" aria-hidden /> Sicurezza alimentare in Italia
-            </span>
-            <h1 className="font-heading text-3xl font-black leading-tight tracking-tight sm:text-4xl lg:text-5xl">
-              Richiami alimentari e provenienza del pescato.
-            </h1>
-            <p className="max-w-2xl text-slate-300">
-              Consulta gli ultimi richiami pubblicati e scopri da quale zona FAO proviene il pesce che
-              acquisti. Ogni informazione riporta sempre la fonte.
-            </p>
-            <div className="flex flex-wrap gap-3 pt-2">
-              <Link to="/richiami" data-testid="hero-recalls-cta" className={buttonVariants({ size: "lg" })}>
-                Vedi gli ultimi richiami
-              </Link>
-              <Link
-                to="/mare"
-                data-testid="hero-marine-cta"
-                className={`${buttonVariants({ variant: "outline", size: "lg" })} border-white/40 bg-transparent text-white hover:bg-white/10 hover:text-white`}
-              >
-                Controlla zona FAO
-              </Link>
-            </div>
+      <section className="overflow-hidden rounded-[2rem] border border-white/80 bg-white/75 px-6 py-10 text-slate-950 shadow-[0_24px_70px_-32px_rgba(15,23,42,0.45)] backdrop-blur-2xl sm:px-10 lg:px-16 lg:py-14 dark:border-slate-700/80 dark:bg-slate-900/70 dark:text-white">
+        <div className="mx-auto max-w-4xl text-center">
+          <p className="text-xs font-bold uppercase tracking-[0.24em] text-sky-700 dark:text-sky-300">
+            Sicurezza alimentare in Italia
+          </p>
+          <h1 className="mt-4 font-heading text-4xl font-black leading-[1.05] tracking-[-0.04em] sm:text-5xl lg:text-6xl">
+            Richiami alimentari e provenienza del pescato.
+          </h1>
+          <p className="mx-auto mt-5 max-w-2xl text-base leading-7 text-slate-600 sm:text-lg dark:text-slate-300">
+            Consulta gli ultimi richiami pubblicati e scopri da quale zona FAO proviene il pesce che
+            acquisti. Ogni informazione riporta sempre la fonte.
+          </p>
+          <div className="flex flex-wrap justify-center gap-3 pt-7">
+            <Link to="/richiami" data-testid="hero-recalls-cta" className={buttonVariants({ size: "lg" })}>
+              Vedi gli ultimi richiami
+            </Link>
+            <Link
+              to="/mare"
+              data-testid="hero-marine-cta"
+              className={`${buttonVariants({ variant: "outline", size: "lg" })} border-slate-300 bg-white/60 hover:bg-white dark:border-slate-600 dark:bg-slate-900/40 dark:hover:bg-slate-800`}
+            >
+              Controlla zona FAO
+            </Link>
           </div>
-          <div className="lg:col-span-5">
-            <div className="rounded-2xl border border-white/15 bg-white/5 p-5 backdrop-blur">
-              <p className="text-xs font-bold uppercase tracking-[0.2em] text-sky-300">Informazione verificabile</p>
-              <p className="mt-2 font-heading text-3xl font-black">Fonti sempre indicate</p>
-              <p className="mt-2 text-sm text-slate-300">
-                Ministero della Salute, RASFF e FAO con collegamento alla fonte originale.
-              </p>
-              <Link to="/fonti" className="mt-4 inline-flex text-sm font-semibold text-sky-300 underline underline-offset-4">
-                Scopri fonti e metodologia
-              </Link>
-            </div>
+          <div className="mt-9 flex flex-wrap justify-center gap-x-7 gap-y-3 border-t border-slate-200/80 pt-5 text-sm text-slate-500 dark:border-slate-700 dark:text-slate-300">
+            <span className="inline-flex items-center gap-2">
+              <ShieldCheck className="size-4 text-sky-600 dark:text-sky-300" aria-hidden />
+              Fonti ufficiali sempre indicate
+            </span>
+            <span className="inline-flex items-center gap-2">
+              <RefreshCw className="size-4 text-sky-600 dark:text-sky-300" aria-hidden />
+              Aggiornamenti automatici
+            </span>
+            <Link to="/fonti" className="font-semibold text-sky-700 underline underline-offset-4 dark:text-sky-300">
+              Fonti e metodologia
+            </Link>
           </div>
         </div>
       </section>

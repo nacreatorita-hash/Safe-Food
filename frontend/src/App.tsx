@@ -7,6 +7,7 @@ import RecallDetail from "@/pages/RecallDetail";
 import Marine from "@/pages/Marine";
 import Notifications from "@/pages/Notifications";
 import Sources from "@/pages/Sources";
+import InstallApp from "@/pages/InstallApp";
 import Admin from "@/pages/Admin";
 import Login from "@/pages/Login";
 import AdminGuard from "@/components/layout/AdminGuard";
@@ -24,6 +25,7 @@ export default function App() {
         <Route path="/fao" element={<Marine />} />
         <Route path="/notifiche" element={<Notifications />} />
         <Route path="/fonti" element={<Sources />} />
+        <Route path="/installa" element={<InstallApp />} />
         <Route path="/login" element={<Login />} />
         <Route path="/admin" element={<AdminGuard><Admin /></AdminGuard>} />
         <Route path="*" element={<Home />} />

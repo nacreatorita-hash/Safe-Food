@@ -21,7 +21,7 @@ from services.ingestion.rasff_service import PORTAL_URL
 
 SOURCES = [
     DataSource(id="src-ministero-rss", name="Ministero della Salute — feed richiami", url=RSS_INDEX_URL,
-               source_type="rss", schedule="ogni 30 minuti"),
+               source_type="rss", schedule="ogni ora"),
     DataSource(id="src-ministero-archivio", name="Ministero della Salute — archivio richiami", url=ARCHIVE_URL,
                source_type="html", schedule="solo manuale"),
     DataSource(id="src-rasff", name="RASFF — Commissione Europea", url=PORTAL_URL,

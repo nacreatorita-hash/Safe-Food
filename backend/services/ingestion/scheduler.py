@@ -31,7 +31,7 @@ def _intervals_min() -> dict[str, int]:
     # the automatic scheduler and may only be refreshed by an explicit admin
     # action when the official classification changes.
     return {
-        "rss": _minutes("SYNC_MINISTERO_MINUTES", 30),
+        "rss": _minutes("SYNC_MINISTERO_MINUTES", 60),
         "rasff": _minutes("SYNC_RASFF_MINUTES", 360),
         "api": _minutes("SYNC_ENVIRONMENT_MINUTES", 24 * 60),
     }

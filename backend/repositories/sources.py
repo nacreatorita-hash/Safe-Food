@@ -32,7 +32,17 @@ async def upsert_source(payload: dict[str, Any]) -> None:
     async with session_scope() as session:
         existing = (await session.execute(select(data_sources.c.id).where(data_sources.c.id == payload["id"]))).first()
         if existing:
-            values = {key: value for key, value in payload.items() if key != "id"}
+            # Seed/configuration updates must not reset runtime telemetry. In
+            # particular, changing the cadence must preserve the last sync,
+            # counters, errors and the durable Ministero queue.
+            runtime_fields = {
+                "last_sync_at", "last_successful_sync_at", "last_error",
+                "record_count", "pending_count", "last_recheck_at", "pending_entries",
+            }
+            values = {
+                key: value for key, value in payload.items()
+                if key not in {"id", *runtime_fields}
+            }
             await session.execute(update(data_sources).where(data_sources.c.id == payload["id"]).values(**values))
         else:
             await session.execute(data_sources.insert().values(**payload))
