@@ -1,17 +1,23 @@
 """Python side of the headless fetcher (see tools/ministero_fetch.mjs)."""
 
+
 import asyncio
 import json
 import os
 from pathlib import Path
 from typing import Any
 
+
 TOOLS_DIR = Path(__file__).resolve().parent.parent.parent / "tools"
 SCRIPT = TOOLS_DIR / "ministero_fetch.mjs"
 
 
+
+
 class FetchError(RuntimeError):
     pass
+
+
 
 
 async def fetch_many(urls: list[str], timeout: float = 180.0) -> dict[str, dict[str, Any]]:
@@ -29,10 +35,13 @@ async def fetch_many(urls: list[str], timeout: float = 180.0) -> dict[str, dict[
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
     except asyncio.TimeoutError as exc:
         proc.kill()
+        await proc.wait()
         raise FetchError("timeout del browser headless") from exc
+    except asyncio.CancelledError:
+        proc.kill()
+        await proc.wait()
+        raise
     if proc.returncode != 0:
         raise FetchError(stderr.decode(errors="ignore")[-400:] or "browser headless terminato con errore")
     try:
         return json.loads(stdout.decode())
-    except json.JSONDecodeError as exc:
-        raise FetchError("output non valido dal fetcher headless") from exc
