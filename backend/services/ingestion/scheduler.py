@@ -24,34 +24,59 @@ def _minutes(name: str, default: int) -> int:
         return default
 
 
-async def scheduler_loop() -> None:
-    intervals_min = {
+def _intervals_min() -> dict[str, int]:
+    return {
         "rss": _minutes("SYNC_MINISTERO_MINUTES", 30),
         "rasff": _minutes("SYNC_RASFF_MINUTES", 360),
         "wfs": _minutes("SYNC_FAO_MINUTES", 7 * 24 * 60),
         "api": _minutes("SYNC_ENVIRONMENT_MINUTES", 24 * 60),
     }
+
+
+def _enabled() -> bool:
     if os.environ.get("SCHEDULER_ENABLED", "true").lower() != "true":
         logger.info("Scheduler disabilitato da SCHEDULER_ENABLED")
+        return False
+    return True
+
+
+async def _sync_due_sources(intervals_min: dict[str, int]) -> None:
+    now = datetime.now(timezone.utc)
+    for source in await list_active_source_types(list(intervals_min)):
+        last = source.get("last_sync_at")
+        if last is not None and last.tzinfo is None:
+            last = last.replace(tzinfo=timezone.utc)
+        due = last is None or (now - last).total_seconds() >= intervals_min[source["source_type"]] * 60
+        if due:
+            try:
+                result = await run_source(source)
+                logger.info("%s: %s", source["name"], result.message)
+            except Exception as exc:  # keep the loop alive whatever happens
+                logger.warning("%s: %s", source["name"], exc)
+
+
+async def scheduler_loop() -> None:
+    intervals_min = _intervals_min()
+    if not _enabled():
         return
 
     await ensure_indexes()
     await asyncio.sleep(15)
     while True:
-        now = datetime.now(timezone.utc)
-        for source in await list_active_source_types(list(intervals_min)):
-            last = source.get("last_sync_at")
-            if last is not None and last.tzinfo is None:
-                last = last.replace(tzinfo=timezone.utc)
-            due = last is None or (now - last).total_seconds() >= intervals_min[source["source_type"]] * 60
-            if due:
-                try:
-                    result = await run_source(source)
-                    logger.info("%s: %s", source["name"], result.message)
-                except Exception as exc:  # keep the loop alive whatever happens
-                    logger.warning("%s: %s", source["name"], exc)
+        await _sync_due_sources(intervals_min)
         await asyncio.sleep(60)
 
 
-async def run_scheduler() -> None:
+async def run_once() -> None:
+    """Run only the sources whose configured interval has elapsed."""
+    if not _enabled():
+        return
+    await ensure_indexes()
+    await _sync_due_sources(_intervals_min())
+
+
+async def run_scheduler(*, once: bool = False) -> None:
+    if once:
+        await run_once()
+        return
     await scheduler_loop()
