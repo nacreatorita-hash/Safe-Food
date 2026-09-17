@@ -9,6 +9,7 @@ from lib.access import (
     SESSION_COOKIE,
     admin_email,
     cookie_is_secure,
+    cookie_samesite,
     get_admin_session,
     issue_admin_session,
     session_ttl_seconds,
@@ -45,7 +46,7 @@ async def login(payload: LoginRequest, request: Request, response: Response):
         max_age=session_ttl_seconds(),
         httponly=True,
         secure=cookie_is_secure(request),
-        samesite="lax",
+        samesite=cookie_samesite(request),
         path="/",
     )
     return {"authenticated": True, "user": {"email": admin_email(), "role": "admin"}}

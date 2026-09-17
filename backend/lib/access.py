@@ -116,6 +116,14 @@ def cookie_is_secure(request: Request) -> bool:
     return request.url.scheme == "https"
 
 
+def cookie_samesite(request: Request) -> str:
+    """Allow the hosted frontend to send the admin cookie to the API cross-site."""
+
+    if cookie_is_secure(request) and os.environ.get("APP_ENV", "").strip().lower() == "production":
+        return "none"
+    return "lax"
+
+
 def new_session_secret() -> str:
     """Small helper for local setup scripts; never called by the web request path."""
 
