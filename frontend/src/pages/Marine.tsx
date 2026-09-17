@@ -1,7 +1,7 @@
 import { useCallback, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronRight, Fish, MapPinned, Waves } from "lucide-react";
+import { Fish, MapPinned, Waves } from "lucide-react";
 import { apiGet } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -31,16 +31,8 @@ export default function Marine() {
   });
   const list = areas.data ?? [];
   const area = list.find((a) => a.code === selected);
-  const children = list.filter((a) => a.parent_code === selected);
-  const ancestors: FaoArea[] = [];
-  for (let cur = area; cur?.parent_code; ) {
-    const p = list.find((a) => a.code === cur!.parent_code);
-    if (!p) break;
-    ancestors.unshift(p);
-    cur = p;
-  }
-  // overview layer: children when they exist, else the siblings of the selection
-  const overviewParent = children.length > 0 ? selected : area?.parent_code ?? null;
+  // Keep the official hierarchy available to the API, but present only the selected area in the UI.
+  const overviewParent = area?.parent_code ?? null;
   const overviewUrl = overviewParent ? `/fao/overview?parent=${overviewParent}` : "/fao/overview?level=1";
 
   const overview = useQuery({
@@ -67,8 +59,8 @@ export default function Marine() {
         </span>
         <h1 className="font-heading text-3xl font-extrabold tracking-tight">Zone di pesca FAO</h1>
         <p className="max-w-3xl text-slate-600 dark:text-slate-400">
-          Tutte le {list.length || "…"} aree, sottozone e divisioni ufficiali FAO (CWP). Inserisci il codice
-          riportato in etichetta per individuare l'area di cattura del pescato.
+          Seleziona un'area FAO principale oppure inserisci il codice riportato in etichetta per individuare
+          la zona di cattura del pescato.
         </p>
       </header>
 
@@ -103,7 +95,7 @@ export default function Marine() {
             data-testid={`fao-chip-${a.code}`}
             onClick={() => selectZone(a.code)}
             className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors duration-150 ${
-              a.code === selected || ancestors[0]?.code === a.code
+              a.code === selected || selected.startsWith(`${a.code}.`)
                 ? "border-sky-600 bg-sky-600 text-white"
                 : "border-slate-200 bg-card text-slate-600 hover:bg-slate-100 dark:border-slate-800 dark:text-slate-300"
             }`}
@@ -121,21 +113,6 @@ export default function Marine() {
           data-testid="fao-zone-detail"
           className="space-y-4 rounded-3xl border border-sky-200 bg-sky-50 p-6 dark:border-sky-900 dark:bg-sky-950/30"
         >
-          <nav aria-label="Gerarchia della zona" data-testid="fao-hierarchy" className="flex flex-wrap items-center gap-1 text-sm text-sky-900 dark:text-sky-200">
-            {[...ancestors, area].map((a, i, arr) => (
-              <span key={a.code} className="inline-flex items-center gap-1">
-                {i > 0 && <ChevronRight className="size-3.5" aria-hidden />}
-                <button
-                  type="button"
-                  data-testid={`fao-crumb-${a.code}`}
-                  onClick={() => selectZone(a.code)}
-                  className={i === arr.length - 1 ? "font-bold" : "underline underline-offset-2"}
-                >
-                  {a.level_label} <span className="font-mono">{a.code}</span> — {a.name_it}
-                </button>
-              </span>
-            ))}
-          </nav>
           <h2 data-testid="fao-zone-name" className="font-heading text-2xl font-bold text-sky-950 dark:text-sky-50">
             FAO {area.code} · {area.name_it}
           </h2>
@@ -143,26 +120,6 @@ export default function Marine() {
             {area.name_en !== area.name_it && <span className="text-sky-700 dark:text-sky-300">{area.name_en} · </span>}
             {area.ocean}
           </p>
-          {children.length > 0 && (
-            <div>
-              <p className="text-xs font-bold uppercase tracking-[0.2em] text-sky-700 dark:text-sky-300">
-                {children[0].level_label === "Sottozona" ? "Sottozone" : "Suddivisioni"} ({children.length})
-              </p>
-              <div className="mt-2 flex flex-wrap gap-2" data-testid="fao-children">
-                {children.map((c) => (
-                  <button
-                    key={c.code}
-                    type="button"
-                    data-testid={`fao-child-${c.code}`}
-                    onClick={() => selectZone(c.code)}
-                    className="rounded-lg border border-sky-300 bg-white px-2.5 py-1 text-xs font-semibold text-sky-900 transition-colors hover:bg-sky-100 dark:border-sky-800 dark:bg-sky-950 dark:text-sky-100"
-                  >
-                    <span className="font-mono">{c.code}</span> {c.name_it}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
           {area.common_species.length > 0 && (
             <p className="text-sm text-sky-900 dark:text-sky-200">
               <Fish className="mr-1 inline size-4" aria-hidden />

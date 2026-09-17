@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import CookieConsent from "@/components/layout/CookieConsent";
 import InstallPrompt from "@/components/layout/InstallPrompt";
+import PullToRefresh from "@/components/layout/PullToRefresh";
 import type { AppNotification } from "@/types/api";
 
 const NAV = [
@@ -134,6 +135,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
 
       <CookieConsent />
       <InstallPrompt />
+      <PullToRefresh />
 
       <nav
         aria-label="Navigazione mobile"

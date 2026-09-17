@@ -75,6 +75,7 @@ export default function FaoMap({
     <div
       ref={containerRef}
       data-testid="fao-map"
+      data-pull-refresh-ignore
       role="region"
       aria-label="Mappa interattiva delle zone FAO"
       className="h-80 w-full overflow-hidden rounded-2xl border border-sky-200 dark:border-sky-900 md:h-[440px]"
