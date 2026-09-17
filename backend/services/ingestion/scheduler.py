@@ -1,7 +1,7 @@
 """Single-process scheduler worker.
 
 The API process does not start this loop. Run one dedicated worker with
-``python scheduler.py`` in production so multiple API workers cannot duplicate
+python scheduler.py in production so multiple API workers cannot duplicate
 ingestion and notifications.
 """
 
@@ -12,7 +12,6 @@ from datetime import datetime, timezone
 
 from lib.db import ensure_indexes
 from models.schemas import SyncResult
-from repositories.recalls import count_for_source
 from repositories.sources import list_active_source_types, update_source
 from services.ingestion.sync import run_source
 
@@ -28,6 +27,9 @@ def _minutes(name: str, default: int) -> int:
 
 
 def _intervals_min() -> dict[str, int]:
+    # FAO areas are reference geometry. They are deliberately excluded from
+    # the automatic scheduler and may only be refreshed by an explicit admin
+    # action when the official classification changes.
     return {
         "rss": _minutes("SYNC_MINISTERO_MINUTES", 30),
         "rasff": _minutes("SYNC_RASFF_MINUTES", 360),
@@ -52,14 +54,6 @@ def _source_timeout() -> float:
 async def _sync_due_sources(intervals_min: dict[str, int]) -> None:
     now = datetime.now(timezone.utc)
     sources = await list_active_source_types(list(intervals_min))
-    rss_source = next((source for source in sources if source["source_type"] == "rss"), None)
-    html_source = next((source for source in sources if source["source_type"] == "html"), None)
-
-    # `sync_ministero` already reads both official RSS feeds and the HTML
-    # archive. Do not execute the same expensive browser/OCR pipeline twice
-    # when both bookkeeping rows are active.
-    if rss_source and html_source:
-        sources = [source for source in sources if source is not html_source]
 
     for source in sources:
         last = source.get("last_sync_at")
@@ -69,19 +63,6 @@ async def _sync_due_sources(intervals_min: dict[str, int]) -> None:
         if due:
             try:
                 result = await asyncio.wait_for(run_source(source), timeout=_source_timeout())
-                if source is rss_source and html_source:
-                    # Keep the archive row truthful in the admin view: the
-                    # combined Ministero sync also covers that source.
-                    archive_update = {"last_sync_at": now}
-                    if result.ok:
-                        archive_update.update({
-                            "last_successful_sync_at": now,
-                            "last_error": None,
-                            "record_count": await count_for_source("Ministero della Salute"),
-                        })
-                    else:
-                        archive_update["last_error"] = result.message
-                    await update_source(html_source["id"], archive_update)
                 logger.info("%s: %s", source["name"], result.message)
             except asyncio.TimeoutError:
                 message = (f"{source['name']}: timeout dopo {_source_timeout():.0f} secondi; "
@@ -90,11 +71,6 @@ async def _sync_due_sources(intervals_min: dict[str, int]) -> None:
                     "last_sync_at": now,
                     "last_error": message,
                 })
-                if source is rss_source and html_source:
-                    await update_source(html_source["id"], {
-                        "last_sync_at": now,
-                        "last_error": message,
-                    })
                 logger.warning(message)
             except Exception as exc:  # keep the loop alive whatever happens
                 logger.warning("%s: %s", source["name"], exc)
