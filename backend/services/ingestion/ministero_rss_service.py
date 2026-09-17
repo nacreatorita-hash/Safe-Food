@@ -7,9 +7,12 @@ The site is behind a JavaScript challenge, so requests go through the headless f
 Nothing is invented: on failure the caller keeps existing records and logs the error.
 """
 
+import asyncio
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from typing import Optional
+
+import httpx
 
 from services.ingestion.headless_fetch import FetchError, fetch_many
 
@@ -50,10 +53,26 @@ def parse_feed(xml_text: str, feed: str) -> list[RssEntry]:
     return entries
 
 
-async def fetch_entries(url: Optional[str] = None) -> list[RssEntry]:
-    """Fetch and parse both feeds (or a single one). Raises on transport/parse errors."""
+async def fetch_entries(url: Optional[str] = None, *, timeout: float = 90.0) -> list[RssEntry]:
+    """Fetch feeds directly, using the browser only when the portal requires it."""
     targets = {k: v for k, v in FEEDS.items() if url is None or v == url} or {"custom": url or ""}
-    results = await fetch_many(list(targets.values()))
+    feed_urls = list(targets.values())
+    results: dict[str, dict[str, object]] = {}
+    fallback_urls: list[str] = []
+    async with httpx.AsyncClient(timeout=min(timeout, 30.0), follow_redirects=True) as client:
+        direct = await asyncio.gather(
+            *(client.get(feed_url) for feed_url in feed_urls), return_exceptions=True
+        )
+    for feed_url, response in zip(feed_urls, direct):
+        if isinstance(response, Exception):
+            fallback_urls.append(feed_url)
+            continue
+        text = response.text
+        results[feed_url] = {"status": response.status_code, "text": text}
+        if response.status_code != 200 or "<rss" not in text[:500].lower():
+            fallback_urls.append(feed_url)
+    if fallback_urls:
+        results.update(await fetch_many(fallback_urls, timeout=timeout))
     entries: list[RssEntry] = []
     errors: list[str] = []
     for feed, feed_url in targets.items():

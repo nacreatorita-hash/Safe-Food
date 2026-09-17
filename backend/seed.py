@@ -23,11 +23,11 @@ SOURCES = [
     DataSource(id="src-ministero-rss", name="Ministero della Salute — feed richiami", url=RSS_INDEX_URL,
                source_type="rss", schedule="ogni 30 minuti"),
     DataSource(id="src-ministero-archivio", name="Ministero della Salute — archivio richiami", url=ARCHIVE_URL,
-               source_type="html", schedule="ogni 6 ore"),
+               source_type="html", schedule="solo manuale"),
     DataSource(id="src-rasff", name="RASFF — Commissione Europea", url=PORTAL_URL,
                source_type="rasff", schedule="ogni 6 ore"),
     DataSource(id="src-fao", name="FAO Major Fishing Areas (WFS)", url=WFS_URL,
-               source_type="wfs", schedule="settimanale"),
+               source_type="wfs", schedule="solo manuale"),
     # Environmental model data are outside the app's fishing-origin scope.
     # Keep the source visible for traceability, but do not schedule syncs.
     DataSource(id="src-copernicus", name="Copernicus Marine Service", url="https://marine.copernicus.eu/",

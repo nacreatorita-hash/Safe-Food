@@ -29,7 +29,12 @@ async def fetch_many(urls: list[str], timeout: float = 180.0) -> dict[str, dict[
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
     except asyncio.TimeoutError as exc:
         proc.kill()
+        await proc.wait()
         raise FetchError("timeout del browser headless") from exc
+    except asyncio.CancelledError:
+        proc.kill()
+        await proc.wait()
+        raise
     if proc.returncode != 0:
         raise FetchError(stderr.decode(errors="ignore")[-400:] or "browser headless terminato con errore")
     try:
