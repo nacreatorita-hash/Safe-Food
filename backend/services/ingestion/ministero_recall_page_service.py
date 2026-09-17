@@ -64,8 +64,8 @@ def parse_page(url: str, html: str) -> RecallPage:
     return page
 
 
-async def fetch_pages(urls: list[str]) -> dict[str, RecallPage]:
-    results = await fetch_many(urls)
+async def fetch_pages(urls: list[str], *, timeout: float = 90.0) -> dict[str, RecallPage]:
+    results = await fetch_many(urls, timeout=timeout)
     pages: dict[str, RecallPage] = {}
     for url in urls:
         res = results.get(url, {})
@@ -74,9 +74,9 @@ async def fetch_pages(urls: list[str]) -> dict[str, RecallPage]:
     return pages
 
 
-async def list_archive_links() -> list[str]:
+async def list_archive_links(*, timeout: float = 45.0) -> list[str]:
     """Cross-check: every recall link present on the official archive page."""
-    results = await fetch_many([ARCHIVE_URL])
+    results = await fetch_many([ARCHIVE_URL], timeout=timeout)
     html = results.get(ARCHIVE_URL, {}).get("text") or ""
     hrefs = re.findall(r'href="([^"]*(?:avviso-sicurezza-alimentare|avvisi-sicurezza-alimentare)/[^"]+)"', html)
     return sorted({urljoin(ARCHIVE_URL, h) for h in hrefs})
