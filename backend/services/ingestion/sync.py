@@ -1,8 +1,9 @@
 """Source synchronisation and durable ingestion bookkeeping.
 
 The functions are shared by the admin trigger and the single scheduler
-worker. Ministero discovery is queued in ``data_sources.pending_entries`` so a
-25-page batch cannot make the remaining archive fall behind permanently.
+worker. Ministero discovery is incremental: only RSS entries that are not
+already in Supabase enter the detail/PDF pipeline. Existing recalls are never
+re-read automatically.
 """
 
 import asyncio
@@ -15,7 +16,7 @@ from models.schemas import RecallLot, SyncResult
 from repositories.fao import count_areas, count_measurements, get_area_record as get_fao_area_record
 from repositories.fao import list_areas as list_fao_areas
 from repositories.fao import replace_measurements, upsert_area
-from repositories.recalls import count_for_source, list_source_ids, list_source_ids_needing_enrichment
+from repositories.recalls import count_for_source, list_source_ids
 from repositories.sources import pending_entries, update_source
 from services.environment import fao_service
 from services.ingestion import ministero_pdf_service as pdf
@@ -32,13 +33,12 @@ MINISTERO_SOURCE = "Ministero della Salute"
 RASFF_SOURCE = "RASFF — Commissione Europea"
 MINISTERO_QUEUE_ID = "src-ministero-rss"
 # Keep each hourly cron invocation bounded. The next invocation continues
-# from the durable queue, so a large backlog is drained progressively.
+# from the durable queue, so a larger-than-usual batch is drained progressively.
 MAX_NEW_PAGES_PER_RUN = 5
-MAX_RECHECK_PAGES_PER_RUN = 3
-MAX_PDFS_PER_RUN = 1
-# A source outage must not hold the hourly cron indefinitely. The RSS path is
-# still processed first; archive pages and PDFs are retried on later runs.
-MINISTERO_ARCHIVE_TIMEOUT_SECONDS = 45.0
+MAX_PDFS_PER_RUN = MAX_NEW_PAGES_PER_RUN
+# A source outage must not hold the hourly cron indefinitely. New entries that
+# cannot complete the detail/PDF pipeline stay in the durable queue and are
+# retried on the next cycle; completed recalls are never re-analysed.
 MINISTERO_RSS_TIMEOUT_SECONDS = 90.0
 MINISTERO_PAGE_TIMEOUT_SECONDS = 90.0
 MINISTERO_PDF_TIMEOUT_SECONDS = 120.0
@@ -88,21 +88,6 @@ def _merge_entries(pending: list[rss.RssEntry], discovered: list[rss.RssEntry]) 
 
 async def sync_ministero() -> SyncResult:
     entries = await rss.fetch_entries(timeout=MINISTERO_RSS_TIMEOUT_SECONDS)
-    try:
-        archive_links = await pages.list_archive_links(timeout=MINISTERO_ARCHIVE_TIMEOUT_SECONDS)
-    except Exception as exc:  # archive down must not block the feed path
-        logger.warning("archivio Ministero non raggiungibile: %s", exc)
-        archive_links = []
-
-    known_links = {entry.link for entry in entries}
-    for link in archive_links:
-        if link not in known_links:
-            entries.append(rss.RssEntry(
-                source_id=link.rstrip("/").rsplit("/", 1)[-1],
-                title=link.rsplit("/", 1)[-1].replace("-", " ").capitalize(),
-                link=link,
-                feed="archivio",
-            ))
 
     existing_ids = await list_source_ids(MINISTERO_SOURCE)
     queued_entries = await pending_entries(MINISTERO_QUEUE_ID)
@@ -113,22 +98,15 @@ async def sync_ministero() -> SyncResult:
     new_batch = new_candidates[:MAX_NEW_PAGES_PER_RUN]
     remaining = new_candidates[MAX_NEW_PAGES_PER_RUN:]
 
-    # Re-read a small rolling window of known items to detect corrections on
-    # official pages. duplicate_detector versions changed content by hash.
-    # During an initial catch-up, spend the browser budget on unseen official
-    # pages first. Once the queue is empty, the next run rechecks known pages
-    # for corrections and creates a version snapshot when their hash changes.
-    enrichment_ids = set() if new_candidates else await list_source_ids_needing_enrichment(
-        MINISTERO_SOURCE, MAX_RECHECK_PAGES_PER_RUN
-    )
-    rechecks = [] if new_candidates else [
-        entry for entry in entries if entry.source_id in (enrichment_ids or existing_ids)
-    ][:MAX_RECHECK_PAGES_PER_RUN]
-    fetch_entries = _merge_entries(new_batch, rechecks)
+    # The RSS feed is only a discovery/index source. Detail pages and PDFs are
+    # fetched for unseen entries only; historical recalls stay untouched.
+    fetch_entries = new_batch
     detail = (await pages.fetch_pages(
         [entry.link for entry in fetch_entries], timeout=MINISTERO_PAGE_TIMEOUT_SECONDS
     )) if fetch_entries else {}
 
+    # PDF rendering/OCR is the expensive part. Five is enough for the normal
+    # Ministero daily volume and keeps the whole new-recall batch together.
     pdf_targets = [page.pdf_urls[0] for page in detail.values() if page.pdf_urls][:MAX_PDFS_PER_RUN]
     pdf_files: dict[str, str] = {}
     pdf_ocr: dict[str, str] = {}
@@ -143,12 +121,21 @@ async def sync_ministero() -> SyncResult:
             logger.warning("download PDF fallito: %s", exc)
 
     inserted = updated = unchanged = failed = 0
+    completed_ids: set[str] = set()
     for entry in fetch_entries:
         try:
             page = detail.get(entry.link)
-            extracted: dict[str, Any] = dict(page.fields) if page else {}
-            confidence: dict[str, float] = dict(page.confidence) if page else {}
-            pdf_url = page.pdf_urls[0] if page and page.pdf_urls else None
+            if page is None:
+                failed += 1
+                logger.warning("richiamo Ministero %s: pagina di dettaglio non disponibile; resta in coda", entry.source_id)
+                continue
+            extracted: dict[str, Any] = dict(page.fields)
+            confidence: dict[str, float] = dict(page.confidence)
+            pdf_url = page.pdf_urls[0] if page.pdf_urls else None
+            if pdf_url and pdf_url not in pdf_files:
+                failed += 1
+                logger.warning("richiamo Ministero %s: PDF non disponibile; resta in coda", entry.source_id)
+                continue
             product_image_url = None
             if pdf_url and pdf_url in pdf_files:
                 product_image_url = pdf.extract_product_image_from_pdf(pdf_files[pdf_url])
@@ -172,9 +159,8 @@ async def sync_ministero() -> SyncResult:
                 # parser learns a new official label.
                 extracted["_origin_checked"] = "1"
             elif not pdf_url:
-                # Some older archive pages have no linked official PDF. Keep
-                # the fact that the page was checked so the scheduler
-                # does not retry the same un-enrichable records indefinitely.
+                # Some official pages have no linked PDF. The page itself is
+                # still a complete source record, so do not retry it forever.
                 extracted["_document_checked"] = "no_pdf"
             published = extracted.pop("published", None)
             published = (pages.italian_date_to_iso(published) if published else None) or entry.published
@@ -203,17 +189,23 @@ async def sync_ministero() -> SyncResult:
                 updated += 1
             else:
                 unchanged += 1
+            completed_ids.add(entry.source_id)
         except Exception as exc:
             failed += 1
             logger.warning("richiamo Ministero %s fallito: %s", entry.source_id, exc)
 
+    # A transient page/PDF failure must not lose a new recall. Keep failed new
+    # entries before the not-yet-started part of the queue. Entries that were
+    # successfully stored are filtered out on the next run by existing_ids.
+    retry_batch = [entry for entry in new_batch if entry.source_id not in completed_ids]
+    remaining = _merge_entries(retry_batch, remaining)
     await update_source(MINISTERO_QUEUE_ID, {
         "pending_entries": [_entry_dict(entry) for entry in remaining],
         "pending_count": len(remaining),
-        "last_recheck_at": datetime.now(timezone.utc),
     })
-    msg = (f"Feed ufficiali letti: {len(entries)} elementi, {inserted} nuovi, {updated} aggiornati, "
-           f"{unchanged} invariati, {failed} falliti; coda residua: {len(remaining)}")
+    msg = (f"Feed ufficiali letti: {len(entries)} elementi, {len(new_candidates)} nuovi individuati, "
+           f"{inserted} inseriti, {updated} aggiornati, {unchanged} invariati, {failed} falliti; "
+           f"richiami storici non rianalizzati; coda residua: {len(remaining)}")
     return SyncResult(source_id="", ok=failed == 0, message=msg + ".", fetched=len(entries),
                       inserted=inserted, updated=updated, unchanged=unchanged, failed=failed)
 
@@ -252,25 +244,27 @@ def _comparable_fao(doc: dict[str, Any]) -> str:
 
 
 async def sync_fao() -> SyncResult:
-    docs = await fao_service.fetch_areas()
     inserted = updated = unchanged = failed = 0
-    now = datetime.now(timezone.utc)
-    for incoming in docs:
-        try:
-            existing = await get_fao_area_record(incoming["code"])
-            if existing and _comparable_fao(existing) == _comparable_fao(incoming):
-                unchanged += 1
-                continue
-            payload = {**incoming, "updated_at": now, "retrieved_at": now}
-            outcome = await upsert_area(payload)
-            inserted += outcome == "inserted"
-            updated += outcome == "updated"
-        except Exception as exc:
-            failed += 1
-            logger.warning("zona FAO %s fallita: %s", incoming.get("code"), exc)
-    return SyncResult(source_id="", ok=failed == 0, fetched=len(docs), inserted=inserted, updated=updated,
+    fetched = 0
+    async for docs in fao_service.iter_area_batches():
+        fetched += len(docs)
+        now = datetime.now(timezone.utc)
+        for incoming in docs:
+            try:
+                existing = await get_fao_area_record(incoming["code"])
+                if existing and _comparable_fao(existing) == _comparable_fao(incoming):
+                    unchanged += 1
+                    continue
+                payload = {**incoming, "updated_at": now, "retrieved_at": now}
+                outcome = await upsert_area(payload)
+                inserted += outcome == "inserted"
+                updated += outcome == "updated"
+            except Exception as exc:
+                failed += 1
+                logger.warning("zona FAO %s fallita: %s", incoming.get("code"), exc)
+    return SyncResult(source_id="", ok=failed == 0, fetched=fetched, inserted=inserted, updated=updated,
                       unchanged=unchanged, failed=failed,
-                      message=f"FAO: {len(docs)} zone, {inserted} inserite, {updated} aggiornate, {unchanged} invariate, {failed} fallite.")
+                      message=f"FAO: {fetched} zone, {inserted} inserite, {updated} aggiornate, {unchanged} invariate, {failed} fallite.")
 
 
 async def sync_environment(source_name: str) -> SyncResult:
