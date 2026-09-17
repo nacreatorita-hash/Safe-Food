@@ -30,8 +30,10 @@ logger = logging.getLogger(__name__)
 MINISTERO_SOURCE = "Ministero della Salute"
 RASFF_SOURCE = "RASFF — Commissione Europea"
 MINISTERO_QUEUE_ID = "src-ministero-rss"
-MAX_NEW_PAGES_PER_RUN = 25
-MAX_RECHECK_PAGES_PER_RUN = 10
+# Keep each hourly cron invocation bounded. The next invocation continues
+# from the durable queue, so a large backlog is drained progressively.
+MAX_NEW_PAGES_PER_RUN = 5
+MAX_RECHECK_PAGES_PER_RUN = 3
 
 
 def _seafood(text: str) -> bool:
@@ -161,8 +163,8 @@ async def sync_ministero() -> SyncResult:
                 extracted["_origin_checked"] = "1"
             elif not pdf_url:
                 # Some older archive pages have no linked official PDF. Keep
-                # the fact that the page was checked so the scheduler does
-                # not retry the same un-enrichable records indefinitely.
+                # the fact that the page was checked so the scheduler
+                # does not retry the same un-enrichable records indefinitely.
                 extracted["_document_checked"] = "no_pdf"
             published = extracted.pop("published", None)
             published = (pages.italian_date_to_iso(published) if published else None) or entry.published
@@ -231,7 +233,7 @@ async def sync_rasff() -> SyncResult:
             logger.warning("notifica RASFF %s fallita: %s", entry.reference, exc)
     return SyncResult(source_id="", ok=failed == 0, fetched=len(entries), inserted=inserted, updated=updated,
                       unchanged=unchanged, failed=failed,
-                      message=f"RASFF: {len(entries)} notifiche, {inserted} nuove, {updated} aggiornate, {unchanged} invariate, {failed} fallite.")
+                      message=f"RASFF: {len(entries)} notifiche, {inserted} nuove, {updated} aggiornate, {failed} fallite.")
 
 
 def _comparable_fao(doc: dict[str, Any]) -> str:
