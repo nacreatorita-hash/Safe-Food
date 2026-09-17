@@ -50,10 +50,10 @@ def parse_feed(xml_text: str, feed: str) -> list[RssEntry]:
     return entries
 
 
-async def fetch_entries(url: Optional[str] = None) -> list[RssEntry]:
+async def fetch_entries(url: Optional[str] = None, *, timeout: float = 90.0) -> list[RssEntry]:
     """Fetch and parse both feeds (or a single one). Raises on transport/parse errors."""
     targets = {k: v for k, v in FEEDS.items() if url is None or v == url} or {"custom": url or ""}
-    results = await fetch_many(list(targets.values()))
+    results = await fetch_many(list(targets.values()), timeout=timeout)
     entries: list[RssEntry] = []
     errors: list[str] = []
     for feed, feed_url in targets.items():
