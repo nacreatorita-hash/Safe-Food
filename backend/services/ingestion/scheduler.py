@@ -11,11 +11,13 @@ import os
 from datetime import datetime, timezone
 
 from lib.db import ensure_indexes
+from models.schemas import SyncResult
 from repositories.recalls import count_for_source
 from repositories.sources import list_active_source_types, update_source
 from services.ingestion.sync import run_source
 
 logger = logging.getLogger("scheduler")
+SOURCE_TIMEOUT_SECONDS = 180
 
 
 def _minutes(name: str, default: int) -> int:
@@ -41,6 +43,13 @@ def _enabled() -> bool:
     return True
 
 
+def _source_timeout() -> float:
+    try:
+        return max(30.0, float(os.environ.get("SYNC_SOURCE_TIMEOUT_SECONDS", SOURCE_TIMEOUT_SECONDS)))
+    except (TypeError, ValueError):
+        return float(SOURCE_TIMEOUT_SECONDS)
+
+
 async def _sync_due_sources(intervals_min: dict[str, int]) -> None:
     now = datetime.now(timezone.utc)
     sources = await list_active_source_types(list(intervals_min))
@@ -60,7 +69,7 @@ async def _sync_due_sources(intervals_min: dict[str, int]) -> None:
         due = last is None or (now - last).total_seconds() >= intervals_min[source["source_type"]] * 60
         if due:
             try:
-                result = await run_source(source)
+                result = await asyncio.wait_for(run_source(source), timeout=_source_timeout())
                 if source is rss_source and html_source:
                     # Keep the archive row truthful in the admin view: the
                     # combined Ministero sync also covers that source.
@@ -75,6 +84,19 @@ async def _sync_due_sources(intervals_min: dict[str, int]) -> None:
                         archive_update["last_error"] = result.message
                     await update_source(html_source["id"], archive_update)
                 logger.info("%s: %s", source["name"], result.message)
+            except asyncio.TimeoutError:
+                message = (f"{source['name']}: timeout dopo {_source_timeout():.0f} secondi; "
+                           "dati precedenti mantenuti, nuovo tentativo al prossimo ciclo.")
+                await update_source(source["id"], {
+                    "last_sync_at": now,
+                    "last_error": message,
+                })
+                if source is rss_source and html_source:
+                    await update_source(html_source["id"], {
+                        "last_sync_at": now,
+                        "last_error": message,
+                    })
+                logger.warning(message)
             except Exception as exc:  # keep the loop alive whatever happens
                 logger.warning("%s: %s", source["name"], exc)
 
