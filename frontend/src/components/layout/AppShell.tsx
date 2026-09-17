@@ -1,11 +1,12 @@
 import type { ReactNode } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, Bell, Home, Search, ShieldAlert, Waves } from "lucide-react";
+import { AlertTriangle, Bell, Home, Search, Waves } from "lucide-react";
 import { apiGet } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import CookieConsent from "@/components/layout/CookieConsent";
+import InstallPrompt from "@/components/layout/InstallPrompt";
 import type { AppNotification } from "@/types/api";
 
 const NAV = [
@@ -39,9 +40,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
       <header className="sticky top-0 z-50 border-b border-slate-200/80 bg-white/85 backdrop-blur-xl dark:border-slate-800/80 dark:bg-slate-950/85">
         <div className="mx-auto flex w-full max-w-7xl items-center gap-3 px-4 py-3 lg:px-8">
           <Link to="/" data-testid="brand-logo" className="flex shrink-0 items-center gap-2">
-            <span className="grid size-9 place-items-center rounded-xl bg-[#091E3A] text-white">
-              <ShieldAlert className="size-5" aria-hidden />
-            </span>
+            <img src="/favicon.svg" alt="" className="size-9 rounded-xl" />
             <span className="hidden font-heading text-lg font-extrabold tracking-tight text-slate-900 sm:block dark:text-slate-50">
               Food Alert <span className="text-sky-600">Italia</span>
             </span>
@@ -116,6 +115,9 @@ export default function AppShell({ children }: { children: ReactNode }) {
             <Link to="/fonti" data-testid="footer-sources-link" className="underline underline-offset-4">
               Fonti e metodologia
             </Link>
+            <Link to="/installa" data-testid="footer-install-link" className="underline underline-offset-4">
+              Installa come app
+            </Link>
             <a href="/fonti#cookie-policy" className="underline underline-offset-4">
               Informativa cookie
             </a>
@@ -131,6 +133,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
       </footer>
 
       <CookieConsent />
+      <InstallPrompt />
 
       <nav
         aria-label="Navigazione mobile"
