@@ -212,8 +212,10 @@ async def sync_ministero() -> SyncResult:
 
 async def sync_rasff() -> SyncResult:
     entries = await rasff_service.fetch_entries()
+    existing_ids = await list_source_ids(RASFF_SOURCE)
+    new_entries = [entry for entry in entries if entry.reference not in existing_ids]
     inserted = updated = unchanged = failed = 0
-    for entry in entries:
+    for entry in new_entries:
         try:
             recall = normalizer.normalize(
                 source=RASFF_SOURCE, source_id=entry.reference, title=entry.subject, source_url=entry.url,
@@ -235,7 +237,8 @@ async def sync_rasff() -> SyncResult:
             logger.warning("notifica RASFF %s fallita: %s", entry.reference, exc)
     return SyncResult(source_id="", ok=failed == 0, fetched=len(entries), inserted=inserted, updated=updated,
                       unchanged=unchanged, failed=failed,
-                      message=f"RASFF: {len(entries)} notifiche, {inserted} nuove, {updated} aggiornate, {unchanged} invariate, {failed} fallite.")
+                      message=f"RASFF: {len(entries)} notifiche lette, {len(new_entries)} nuove individuate, "
+                              f"{inserted} inserite, {failed} fallite; notifiche storiche non rianalizzate.")
 
 
 def _comparable_fao(doc: dict[str, Any]) -> str:
