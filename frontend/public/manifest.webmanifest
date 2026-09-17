@@ -1,0 +1,15 @@
+{
+  "name": "Food Alert Italia — sicurezza alimentare",
+  "short_name": "Food Alert",
+  "description": "Richiami alimentari, dispensa monitorata, zone FAO e dati ambientali marini.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#F8FAFC",
+  "theme_color": "#091E3A",
+  "lang": "it-IT",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

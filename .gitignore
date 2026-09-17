@@ -1,0 +1,31 @@
+# Local secrets and environment files
+**/.env
+**/.env.*
+!**/.env.example
+
+# Dependencies, builds and test artifacts
+**/node_modules/
+**/dist/
+**/coverage/
+**/.pytest_cache/
+**/__pycache__/
+**/.venv/
+**/.mypy_cache/
+**/.ruff_cache/
+**/.tox/
+**/test-results/
+*.log
+
+# Local agent notes and workspace-only assets
+/corepack/
+/memory/
+/work/
+/TEMPLATE.md
+**/.emergent/
+**/work/
+
+# Local editor and operating-system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
