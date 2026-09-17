@@ -1,4 +1,4 @@
-"""Official recall page + archive: second verification path, independent from RSS.
+"""Official recall page + archive: detail-page verification for newly discovered RSS entries.
 
 The page exposes labelled fields in plain text ("Marca:", "Denominazione:",
 "Motivo della segnalazione:", "Data pubblicazione:") and a link to the official PDF.
@@ -75,7 +75,7 @@ async def fetch_pages(urls: list[str], *, timeout: float = 90.0) -> dict[str, Re
 
 
 async def list_archive_links(*, timeout: float = 45.0) -> list[str]:
-    """Cross-check: every recall link present on the official archive page."""
+    """Optional manual backfill helper; never called by the automatic scheduler."""
     results = await fetch_many([ARCHIVE_URL], timeout=timeout)
     html = results.get(ARCHIVE_URL, {}).get("text") or ""
     hrefs = re.findall(r'href="([^"]*(?:avviso-sicurezza-alimentare|avvisi-sicurezza-alimentare)/[^"]+)"', html)
