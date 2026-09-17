@@ -1,6 +1,7 @@
 """Real FAO Major Fishing Areas (CWP) from the official FAO GeoServer WFS — all levels."""
 
 import json
+from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
@@ -57,14 +58,9 @@ def decimate(geometry: dict[str, Any], max_points: int = 60, max_polys: int = 6)
     return geometry
 
 
-async def fetch_areas() -> list[dict[str, Any]]:
-    """Return area documents (metadata + full geometry) from the official WFS."""
-    async with httpx.AsyncClient(timeout=180.0) as http:
-        res = await http.get(WFS_URL)
-    res.raise_for_status()
-    data = res.json()
+def _documents_from_features(features: list[dict[str, Any]]) -> list[dict[str, Any]]:
     docs: list[dict[str, Any]] = []
-    for f in data.get("features", []):
+    for f in features:
         p = f["properties"]
         code = p.get("F_CODE")
         level = p.get("F_LEVEL")
@@ -90,6 +86,45 @@ async def fetch_areas() -> list[dict[str, Any]]:
     return docs
 
 
+async def iter_area_batches(page_size: int = 50) -> AsyncIterator[list[dict[str, Any]]]:
+    """Yield bounded WFS pages so the full FAO geometry never fills RAM."""
+    page_size = max(1, min(page_size, 100))
+    start_index = 0
+    previous_signature: tuple[str, ...] | None = None
+    async with httpx.AsyncClient(timeout=60.0) as http:
+        while True:
+            res = await http.get(WFS_URL, params={
+                "maxFeatures": str(page_size),
+                "startIndex": str(start_index),
+            })
+            res.raise_for_status()
+            features = res.json().get("features", [])
+            if not features:
+                break
+            signature = tuple(
+                str(feature.get("id") or feature.get("properties", {}).get("ID")
+                    or feature.get("properties", {}).get("F_CODE") or "")
+                for feature in features
+            )
+            if signature and signature == previous_signature:
+                break
+            previous_signature = signature
+            batch = _documents_from_features(features)
+            if batch:
+                yield batch
+            if len(features) < page_size:
+                break
+            start_index += len(features)
+
+
+async def fetch_areas() -> list[dict[str, Any]]:
+    """Return all area documents while fetching the official WFS in pages."""
+    docs: list[dict[str, Any]] = []
+    async for batch in iter_area_batches():
+        docs.extend(batch)
+    return docs
+
+
 def bbox(geometry: dict[str, Any]) -> tuple[float, float, float, float] | None:
     pts = []
     def walk(c):
@@ -106,4 +141,4 @@ def bbox(geometry: dict[str, Any]) -> tuple[float, float, float, float] | None:
     return min(lats), min(lons), max(lats), max(lons)
 
 
-__all__ = ["fetch_areas", "bbox", "decimate", "json"]
+__all__ = ["fetch_areas", "iter_area_batches", "bbox", "decimate", "json"]
