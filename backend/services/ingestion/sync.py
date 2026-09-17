@@ -120,7 +120,7 @@ async def sync_ministero() -> SyncResult:
     fetch_entries = _merge_entries(new_batch, rechecks)
     detail = await pages.fetch_pages([entry.link for entry in fetch_entries]) if fetch_entries else {}
 
-    pdf_targets = [page.pdf_urls[0] for page in detail.values() if page.pdf_urls]
+    pdf_targets = [page.pdf_urls[0] for page in detail.values() if page.pdf_urls][:MAX_PDFS_PER_RUN]
     pdf_files: dict[str, str] = {}
     pdf_ocr: dict[str, str] = {}
     pdf_ocr_errors: dict[str, str] = {}
@@ -234,7 +234,7 @@ async def sync_rasff() -> SyncResult:
             logger.warning("notifica RASFF %s fallita: %s", entry.reference, exc)
     return SyncResult(source_id="", ok=failed == 0, fetched=len(entries), inserted=inserted, updated=updated,
                       unchanged=unchanged, failed=failed,
-                      message=f"RASFF: {len(entries)} notifiche, {inserted} nuove, {updated} aggiornate, {failed} fallite.")
+                      message=f"RASFF: {len(entries)} notifiche, {inserted} nuove, {updated} aggiornate, {unchanged} invariate, {failed} fallite.")
 
 
 def _comparable_fao(doc: dict[str, Any]) -> str:
